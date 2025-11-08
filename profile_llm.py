@@ -4,7 +4,7 @@ import os, time, csv, argparse, math
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch.cuda.nvtx as nvtx
-import pandas
+import pandas as pd
 
 try:
     import pynvml
@@ -34,17 +34,36 @@ def make_prompt(tokenizer, prompt_len):
     return tokenizer.decode(tokens, skip_special_tokens=False)
 
 def bytes_str(x):
+    """Convert bytes to megabytes"""
     return f"{x/1024/1024:.1f} MB"
+
+def save_results(result, filename="profiling_results.parquet"):
+
+    # Create a key to get set of profiling results
+    new_row = pd.DataFrame([result]).set_index(["model", "dtype", "batch", "output_tokens", "prompt_len"])
+
+    # Check if results already exist
+    if os.path.exists(filename):
+
+        # Load existing results
+        df = pd.read_parquet(filename)
+
+        # Concatenate and drop duplicate indices, keeping the latest
+        df = pd.concat([df, new_row])
+        df = df[~df.index.duplicated(keep="last")]
+    else:
+        df = new_row
+
+    df.to_parquet(filename)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="facebook/opt-1.3b",
-                    help="HF model id or local path (prefer safetensors weights)")
+    parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
     parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
     parser.add_argument("--batch", type=int, default=1)
-    parser.add_argument("--prompt_len", type=int, default=1024, help="number of input tokens")
-    parser.add_argument("--gen_tokens", type=int, default=256, help="new tokens to generate")
-    parser.add_argument("--out_csv", type=str, default="results.csv")
+    parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
+    parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
+    parser.add_argument("--output_filename", type=str, default="results.csv")
     parser.add_argument("--seed", type=int, default=1234)
     args = parser.parse_args()
 
@@ -116,12 +135,12 @@ def main():
     t1 = current_time_ms()
     nvtx.range_pop()
 
-    prefill_ms = t1 - t0
+    prefill_time = t1 - t0
 
     #-------------------------------------------------------------------------------
     # Decode Stage
     #-------------------------------------------------------------------------------
-    gen_kwargs = dict(max_new_tokens=args.gen_tokens, do_sample=False)
+    gen_kwargs = dict(max_new_tokens=args.output_tokens, do_sample=False)
     nvtx.range_push("decode")
     torch.cuda.synchronize()
     t2 = current_time_ms()
@@ -133,7 +152,7 @@ def main():
     t3 = current_time_ms()
     nvtx.range_pop()
 
-    decode_ms = t3 - t2
+    decode_time = t3 - t2
 
     peak_alloc = torch.cuda.max_memory_allocated()
     if NVML:
@@ -146,34 +165,34 @@ def main():
     #-------------------------------------------------------------------------------
     # Calculate metrics
     #-------------------------------------------------------------------------------
-    tokens = args.gen_tokens * args.batch
-    tps = (tokens) / (decode_ms / 1000.0)
-    per_token_ms = decode_ms / args.gen_tokens
+    tokens = args.output_tokens * args.batch
+    tps = (tokens) / (decode_time / 1000.0)
+    per_token_ms = decode_time / args.output_tokens
 
     print("=== RESULTS ===")
-    print(f"Batch={args.batch}  PromptLen={args.prompt_len}  Gen={args.gen_tokens}  DType={args.dtype}")
-    print(f"Prefill: {prefill_ms:.1f} ms   Decode: {decode_ms:.1f} ms")
+    print(f"BatchSize={args.batch} PromptLength={args.prompt_len} OutputTokens={args.output_tokens} DType={args.dtype}")
+    print(f"Prefill: {prefill_time:.1f} ms")
+    print(f"Decode: {decode_time:.1f} ms")
     print(f"Decode throughput: {tps:.2f} tokens/sec   (~{per_token_ms:.2f} ms/token)")
     print(f"Peak CUDA alloc: {bytes_str(peak_alloc)}")
     if nvml_delta is not None:
         print(f"NVML used delta: {bytes_str(nvml_delta)} (approx overall increase)")
 
-    # Append CSV
-    header = [
-        "model","dtype","device","batch","prompt_len","gen_tokens",
-        "prefill_ms","decode_ms","tokens_sec","per_token_ms",
-        "peak_alloc_bytes","nvml_used_delta_bytes","timestamp"
-    ]
-    row = [
-        args.model, args.dtype, device, args.batch, args.prompt_len, args.gen_tokens,
-        round(prefill_ms,3), round(decode_ms,3), round(tps,3), round(per_token_ms,3),
-        int(peak_alloc), int(nvml_delta or 0), int(time.time())
-    ]
-    write_header = not os.path.exists(args.out_csv)
-    with open(args.out_csv, "a", newline="") as f:
-        w = csv.writer(f)
-        if write_header: w.writerow(header)
-        w.writerow(row)
+    result = {
+        "model": args.model,
+        "dtype": args.dtype,
+        "batch": args.batch,
+        "output_tokens": args.output_tokens,
+        "prompt_len": args.prompt_len,
+        "prefill_time": round(prefill_time, 3),
+        "decode_time": round(decode_time, 3),
+        "tokens_sec": round(per_token_ms, 3),
+        "peak_alloc_bytes": int(peak_alloc),
+        "nvml_used_delta_bytes": int(nvml_delta or 0)
+    }
+
+    # Add results to existing DataFrame in parquet file
+    save_results(result)
 
 if __name__ == "__main__":
     main()
