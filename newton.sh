@@ -13,4 +13,11 @@ module load anaconda/anaconda-2023.09
 # conda activate base
 
 # Run a Python script
-python3 profile_llm.py
+ncu --target-processes all \
+--section MemoryWorkloadAnalysis \
+--section SpeedOfLight_RooflineChart \
+--metrics dram__bytes_read.sum,dram__bytes_write.sum,dram__throughput.avg.pct_of_peak_sustained_elapsed,smsp__warps_active.avg.pct_of_peak_sustained_active \
+--nvtx \
+--nvtx-include "decode" \
+--csv -o ncu_decode_b1 \
+python profile_llm.py --batch 1 --prompt_len 128 --output_tokens 256

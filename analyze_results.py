@@ -37,6 +37,8 @@ def plot_batchsize_vs_time(batch_sizes, model, dtype, output_tokens, prompt_len,
 
     plt.savefig(save_filename, dpi=300)
 
+
+
 plot_batchsize_vs_time(
     batch_sizes = [1, 2],
     model="facebook/opt-1.3b",

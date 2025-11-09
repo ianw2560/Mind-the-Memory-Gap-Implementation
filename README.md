@@ -7,7 +7,8 @@ An implementation of the paper "Mind the Memory Gap: Unveiling GPU Bottlenecks i
 ### Initial Setup
 
 ```
-conda create -n gpuprofiling python=3.10
+conda create -n gpuprofiling python=3.11
+pip install torch==2.9.0 torchvision==0.24.0 transformers==4.57.1 pandas accelerate fastparquet
 ```
 
 Install nvidia nsight Ubuntu

@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--batch", type=int, default=1)
     parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
     parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
-    parser.add_argument("--output_filename", type=str, default="results.csv")
+    parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
     parser.add_argument("--seed", type=int, default=1234)
     args = parser.parse_args()
 
@@ -77,11 +77,15 @@ def main():
         print("CUDA is required for this project.")
         exit(1)
 
-    # Map dtype
-    if args.dtype == "fp16": dtype = torch.float16
-    elif args.dtype == "bf16": dtype = torch.bfloat16
-    elif args.dtype == "fp32": dtype = torch.float32
-    else: dtype = None  # quantized paths set later
+    # Set dtype values
+    if args.dtype == "fp16":
+        dtype = torch.float16
+    elif args.dtype == "bf16":
+        dtype = torch.bfloat16
+    elif args.dtype == "fp32":
+        dtype = torch.float32
+    else:
+        dtype = None
 
     print(f"[INFO] Loading model={args.model} dtype={args.dtype} device={device}")
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
@@ -167,13 +171,12 @@ def main():
     #-------------------------------------------------------------------------------
     tokens = args.output_tokens * args.batch
     tps = (tokens) / (decode_time / 1000.0)
-    per_token_ms = decode_time / args.output_tokens
 
     print("=== RESULTS ===")
     print(f"BatchSize={args.batch} PromptLength={args.prompt_len} OutputTokens={args.output_tokens} DType={args.dtype}")
     print(f"Prefill: {prefill_time:.1f} ms")
     print(f"Decode: {decode_time:.1f} ms")
-    print(f"Decode throughput: {tps:.2f} tokens/sec   (~{per_token_ms:.2f} ms/token)")
+    print(f"Decode throughput: {tps:.2f} tokens/sec")
     print(f"Peak CUDA alloc: {bytes_str(peak_alloc)}")
     if nvml_delta is not None:
         print(f"NVML used delta: {bytes_str(nvml_delta)} (approx overall increase)")
@@ -186,7 +189,7 @@ def main():
         "prompt_len": args.prompt_len,
         "prefill_time": round(prefill_time, 3),
         "decode_time": round(decode_time, 3),
-        "tokens_sec": round(per_token_ms, 3),
+        "tokens_sec": round(tps, 3),
         "peak_alloc_bytes": int(peak_alloc),
         "nvml_used_delta_bytes": int(nvml_delta or 0)
     }
