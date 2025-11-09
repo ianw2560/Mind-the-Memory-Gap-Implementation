@@ -22,7 +22,7 @@ def make_prompt(tokenizer, prompt_len):
     # Create a test prompt
     prompt = "It is an ancient Mariner, And he stoppeth one of three. 'By thy long grey beard and glittering eye, Now wherefore stopp'st thou me?"
 
-    s = (prompt * ((prompt_len // len(tokenizer.encode(prompt))) + 2))[:]
+    s = (prompt * ((prompt_len // len(tokenizer.encode(prompt))) + 2))
     tokens = tokenizer.encode(s)
 
     # Pad/trim to ~prompt_len tokens
@@ -64,10 +64,9 @@ def main():
     parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
     parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
     parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
-    parser.add_argument("--seed", type=int, default=1234)
     args = parser.parse_args()
 
-    torch.manual_seed(args.seed)
+    torch.manual_seed(42)
 
     # Set cuda as the default device
     device = "cuda"
@@ -108,7 +107,7 @@ def main():
     # Build batch of prompts of desired token length
     prompt_text = make_prompt(tokenizer, args.prompt_len)
     batch_prompts = [prompt_text] * args.batch
-    enc = tokenizer(batch_prompts, return_tensors="pt", padding=True, truncation=True)
+    enc = tokenizer(batch_prompts, return_tensors="pt", padding=True)
     input_ids = enc["input_ids"].to(device)
     attn_mask = enc["attention_mask"].to(device)
 
@@ -180,6 +179,7 @@ def main():
     print(f"Peak CUDA alloc: {bytes_str(peak_alloc)}")
     if nvml_delta is not None:
         print(f"NVML used delta: {bytes_str(nvml_delta)} (approx overall increase)")
+    print("===============")
 
     result = {
         "model": args.model,

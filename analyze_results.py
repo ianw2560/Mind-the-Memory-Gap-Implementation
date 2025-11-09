@@ -1,7 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
-def plot_batchsize_vs_time(batch_sizes, model, dtype, output_tokens, prompt_len, filename, save_filename):
+def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, filename, save_filename):
 
     df = pd.read_parquet(filename)
 
@@ -21,18 +22,21 @@ def plot_batchsize_vs_time(batch_sizes, model, dtype, output_tokens, prompt_len,
         prefill_times.append(df.loc[rows[i]]["prefill_time"])
         decode_times.append(df.loc[rows[i]]["decode_time"])
 
+    x = np.arange(len(batch_sizes))
+
     fig, ax = plt.subplots(figsize=(7, 3.5))
 
-    ax.bar(batch_sizes, prefill_times, label="Prefill Time")
-    ax.bar(batch_sizes, decode_times, bottom=prefill_times, label="Decode Time")
+    ax.bar(x, prefill_times, label="Prefill Time")
+    ax.bar(x, decode_times, bottom=prefill_times, label="Decode Time")
 
     ax.set_xlabel("Average Batch Size")
     ax.set_ylabel("Time (ms)")
-    ax.set_xticks(batch_sizes)
     ax.set_title("Batch Size vs Prefill / Decode Time")
-    ax.legend()
-    ax.grid(axis="y", alpha=0.3)
 
+    ax.set_xticks(x)
+    ax.set_xticklabels(batch_sizes)
+
+    ax.legend()
     plt.tight_layout()
 
     plt.savefig(save_filename, dpi=300)
@@ -40,10 +44,9 @@ def plot_batchsize_vs_time(batch_sizes, model, dtype, output_tokens, prompt_len,
 
 
 plot_batchsize_vs_time(
-    batch_sizes = [1, 2],
     model="facebook/opt-1.3b",
     dtype="fp16",
-    prompt_len=1024,
+    prompt_len=128,
     output_tokens=256,
     filename="profiling_results.parquet",
     save_filename="batch_vs_time.png",
