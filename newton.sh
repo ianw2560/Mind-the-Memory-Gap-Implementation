@@ -10,7 +10,7 @@ module load anaconda/anaconda-2023.09
 
 # Activate one of the pre-made ARCC environments (or
 # your own environment) on top of the base environment.
-# conda activate base
+conda activate gpu
 
 # Run a Python script
 ncu --target-processes all \
