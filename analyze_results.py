@@ -1,10 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
-def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, filename, save_filename):
+def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
 
-    df = pd.read_parquet(filename)
+    df = pd.read_parquet(parquet_filename)
+
+    print(df)
 
     idx = pd.IndexSlice
 
@@ -39,15 +42,60 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, filename, sa
     ax.legend()
     plt.tight_layout()
 
-    plt.savefig(save_filename, dpi=300)
+    plt.savefig(f"{save_dir}/batchsize_vs_time.png", dpi=300)
+
+def plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+
+    df = pd.read_parquet(parquet_filename)
+
+    model_name = model.split("/")[1]
+
+    idx = pd.IndexSlice
+
+    sub = df.loc[idx[model, dtype, :, output_tokens, prompt_len], :]
+    batch_sizes = sub.index.get_level_values("batch")
+
+    throughputs = []
+
+    rows = []
+    for i in batch_sizes:
+        rows.append( (model, dtype, i, output_tokens, prompt_len) )
+
+    for i in range(len(batch_sizes)):
+        throughputs.append(df.loc[rows[i]]["tokens_sec"])
+
+    x = np.arange(len(batch_sizes))
+
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+
+    ax.plot(x, throughputs, label=f"{model_name}", marker="o")
+
+    ax.set_xlabel("Average Batch Size")
+    ax.set_ylabel("Throughput (token/sec))")
+    ax.set_title("Throughput vs Batchsize (NVIDIA H100)") 
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(batch_sizes)
+
+    ax.legend()
+    plt.tight_layout()
+
+    plt.savefig(f"{save_dir}/throughput_vs_batchsize.png", dpi=300)
 
 
+def create_plots(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
 
-plot_batchsize_vs_time(
+    os.makedirs(save_dir, exist_ok=True)
+
+    plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+    plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+
+
+create_plots(
     model="facebook/opt-1.3b",
     dtype="fp16",
     prompt_len=128,
     output_tokens=256,
-    filename="profiling_results.parquet",
-    save_filename="batch_vs_time.png",
+    parquet_filename="profiling_results.parquet",
+    save_dir="images",
 )
