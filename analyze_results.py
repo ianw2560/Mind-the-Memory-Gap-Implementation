@@ -31,7 +31,7 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, filename, sa
 
     ax.set_xlabel("Average Batch Size")
     ax.set_ylabel("Time (ms)")
-    ax.set_title("Batch Size vs Prefill / Decode Time")
+    ax.set_title("Batch Size vs Prefill/Decode Time (opt-1.3b, NVIDIA H100)") 
 
     ax.set_xticks(x)
     ax.set_xticklabels(batch_sizes)
