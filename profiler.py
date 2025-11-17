@@ -5,6 +5,7 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch.cuda.nvtx as nvtx
 import pandas as pd
+from huggingface_hub import login
 
 try:
     import pynvml
@@ -70,6 +71,9 @@ def main():
 
     # Set cuda as the default device
     device = "cuda"
+
+    # Login into HuggingFace for Llama models
+    login(token=os.getenv("HUGGINGFACE_KEY"))
 
     # Check if cuda is available
     if not torch.cuda.is_available():
