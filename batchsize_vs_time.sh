@@ -6,6 +6,8 @@
 #SBATCH --time=2:00:00
 #SBATCH -o batchsize_%j.out
 
+echo $HUGGINGFACE_KEY
+
 # OPT-2.7B
 python profiler.py --model facebook/opt-2.7b --batch 1 --prompt_len 128 --output_tokens 256
 python profiler.py --model facebook/opt-2.7b --batch 2 --prompt_len 128 --output_tokens 256
