@@ -64,9 +64,9 @@ def plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parque
     for i in range(len(batch_sizes)):
         throughputs.append(df.loc[rows[i]]["tokens_sec"])
 
-    x = np.arange(len(batch_sizes))
+    x = batch_sizes #np.arange(len(batch_sizes))
 
-    fig, ax = plt.subplots(figsize=(7, 3.5))
+    fig, ax = plt.subplots(figsize=(4, 3.5))
 
     ax.plot(x, throughputs, label=f"{model_name}", marker="o")
 
@@ -74,8 +74,10 @@ def plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parque
     ax.set_ylabel("Throughput (token/sec))")
     ax.set_title("Throughput vs Batchsize (NVIDIA H100)") 
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(batch_sizes)
+    # ax.set_xticks(x)
+    # ax.set_xticklabels(batch_sizes)
+    ax.set_xlim(0, 600)
+    ax.set_xticks(np.arange(0, 601, 100))
 
     ax.legend()
     plt.tight_layout()
@@ -89,6 +91,8 @@ def create_plots(model, dtype, output_tokens, prompt_len, parquet_filename, save
 
     plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
     plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+
+
 
 
 create_plots(

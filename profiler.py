@@ -172,7 +172,7 @@ def main():
     #-------------------------------------------------------------------------------
     # Calculate metrics
     #-------------------------------------------------------------------------------
-    tokens = args.output_tokens * args.batch
+    tokens = (args.prompt_len + args.output_tokens) * args.batch
     tps = (tokens) / (decode_time / 1000.0)
 
     print("=== RESULTS ===")
