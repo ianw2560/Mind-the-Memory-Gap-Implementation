@@ -10,7 +10,7 @@ If you wish to create the conda env from scratch, run the following:
 
 ```
 conda create -n gpuprofiling python=3.11
-pip install torch==2.9.0 torchvision==0.24.0 transformers==4.57.1 pandas accelerate fastparquet
+pip install torch==2.9.0 torchvision==0.24.0 transformers==4.57.1 pandas accelerate fastparquet tiktoken sentencepiece
 ```
 
 ### Initial Setup
