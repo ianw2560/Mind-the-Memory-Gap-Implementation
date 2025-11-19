@@ -156,11 +156,16 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
     tokens = (prompt_len + output_tokens) * batch
     tps = (tokens) / (decode_time / 1000.0)
 
+    # Inter-token latency (ITL): average time between two generated tokens
+    # for a single request (ms), using only the decode phase.
+    inter_token_latency_ms  = decode_time / output_tokens
+
     print("=== RESULTS ===")
     print(f"BatchSize={batch} PromptLength={prompt_len} OutputTokens={output_tokens} DType={dtype}")
     print(f"Prefill: {prefill_time:.1f} ms")
     print(f"Decode: {decode_time:.1f} ms")
     print(f"Decode throughput: {tps:.2f} tokens/sec")
+    print(f"Inter-token latency: {inter_token_latency_ms:.2f} ms")
     print(f"Peak CUDA alloc: {bytes_to_mb(peak_alloc)}")
     if nvml_delta is not None:
         print(f"NVML used delta: {bytes_to_mb(nvml_delta)} (approx overall increase)")
@@ -175,6 +180,7 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
         "prefill_time": round(prefill_time, 3),
         "decode_time": round(decode_time, 3),
         "tokens_sec": round(tps, 3),
+        "inter_token_latency_ms": round(inter_token_latency_ms, 3),
         "peak_alloc_bytes": int(peak_alloc),
         "nvml_used_delta_bytes": int(nvml_delta or 0)
     }
