@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+from bca import calculate_b_opt
+
 def plot_batchsize_vs_time(model, dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
     df = pd.read_parquet(parquet_filename)
@@ -59,7 +61,7 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
 
     models = sub_all.index.get_level_values("model").unique()
 
-    fig, ax = plt.subplots(figsize=(6, 3.5))
+    fig, ax = plt.subplots(figsize=(4.5, 3.5))
 
     for m in models:
         sub_m = sub_all.xs(m, level="model").sort_index(level="batch")
@@ -73,7 +75,7 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
     ax.set_ylabel("Throughput (tokens/sec)")
     ax.set_title("Throughput vs Batch Size (NVIDIA H100)")
     ax.set_xlim(0, 600)
-    ax.set_xticks(np.arange(0, 301, 100))
+    ax.set_xticks(np.arange(0, 501, 100))
 
     ax.legend()
     plt.tight_layout()
@@ -95,9 +97,11 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
     # Select rows for this configuration and sort by batch size
     sub = df.loc[idx[model, dtype, :, output_tokens, input_tokens], :].sort_index(level="batch")
     batch_sizes = sub.index.get_level_values("batch").to_numpy()
+    
 
     throughputs = []
     latencies = []
+    decode_times = []
 
     for b in batch_sizes:
         row = (model, dtype, b, output_tokens, input_tokens)
@@ -105,6 +109,7 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
 
         throughputs.append(row_data["tokens_sec"])
         latencies.append(row_data["inter_token_latency_ms"])
+        decode_times.append(row_data["decode_time"])
 
     latencies = np.array(latencies, dtype=float)
     throughputs = np.array(throughputs, dtype=float)
@@ -117,12 +122,23 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
     ax.set_xlabel("Latency (ms)")
     ax.set_ylabel("Throughput (tokens/sec)")
     ax.set_title("Throughput vs Latency Trade-off")
+    ax.grid(True)
+
+    # BCA User Parameters    
+    slo = 100.0
+    eps = 0.1
+
+    b_opt = calculate_b_opt(batch_sizes, decode_times, latencies, slo, eps)
+    print(b_opt)
+    b_opt = b_opt["Bopt"]
+
+    print(b_opt)
 
 
-    #     idx_opt = np.where(batch_sizes == optimal_batch)[0][0]
-    #     latency_opt = latencies[idx_opt]
-    #     ax.axvline(latency_opt, linestyle="--", label=f"Optimal Batch: {optimal_batch}")
-    #     ax.legend(loc="lower right")
+    idx_opt = np.where(batch_sizes == b_opt)[0][0]
+    latency_opt = latencies[idx_opt]
+    ax.axvline(latency_opt, linestyle="--", label=f"B_opt: {b_opt}")
+    ax.legend(loc="lower right")
 
     plt.tight_layout()
     plt.savefig(f"{save_dir}/{model_name}_throughput_vs_latency.png", dpi=300)
@@ -155,7 +171,7 @@ create_plots(
     dtype="fp16",
     input_tokens=128,
     output_tokens=256,
-    parquet_filename="profiling_results.parquet",
+    parquet_filename="final_results.parquet",
     #parquet_filename="batchsize_1-256_128_256_newton.parquet",
     save_dir="images",
 )

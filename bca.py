@@ -1,6 +1,10 @@
-import numpy as np
+#!/usr/bin/env python3
 
-def pick_Bopt(batch_sizes, T_values, L_values, SLO, eps=0.1, tol=1e-3):
+import argparse
+import numpy as np
+import pandas as pd
+
+def calculate_b_opt(batch_sizes, T_values, L_values, SLO, eps=0.1, tol=1e-3):
     B = np.array(batch_sizes) # Batch size
     T = np.array(T_values) # Throughput
     L = np.array(L_values) # Latency
@@ -53,14 +57,40 @@ def pick_Bopt(batch_sizes, T_values, L_values, SLO, eps=0.1, tol=1e-3):
 
 
 if __name__ == "__main__":
-    batch_sizes = [1,2,4,8,16,32,64,96,128,256,512]
-    T_values = [100,190,360,680,1200,2000,3000,3200,3300,3350,3360]
-    L_values = [1,1.2,1.5,2.0,3.0,6.0,12.0,18.0,30.0,60.0,150.0]
-    SLO = 25.0
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
+    parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
+    parser.add_argument("--input_tokens", type=int, default=128, help="Number of input tokens")
+    parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
+    parser.add_argument("--input_filename", type=str, default="profiling_results.parquet")
+    parser.add_argument("--all", action='store_true', help="Iterate overall models from 1 to batch.")
+    args = parser.parse_args()
+
+    # BCA User Parameters    
+    SLO = 10.0 #25.0
     eps = 0.1
 
-    out = pick_Bopt(batch_sizes, T_values, L_values, SLO, eps)
-    print("Bopt:", out['Bopt'], "T:", out['T'], "L:", out['L'])
-    #print("Feasible candidates:")
-    #for candidate in out['feasible_list']:
-    #    print(candidate)
+    # Read in GPU profiling data
+    df = pd.read_parquet(args.input_filename)
+    
+    # Filter on dtype, output_tokens, input_tokens
+    model_df = df.xs(
+        (args.model, args.dtype, args.output_tokens, args.input_tokens),
+        level=("model", "dtype", "output_tokens", "input_tokens")
+    )
+
+    batch_sizes = model_df.index.to_numpy()
+    latencies = model_df["inter_token_latency_ms"].to_numpy()
+    decode_times = model_df["decode_time"].to_numpy()
+
+    print(batch_sizes)
+    print(latencies)
+    print(decode_times)
+
+    result = calculate_b_opt(batch_sizes, decode_times, latencies, SLO, eps)
+
+    print("=== RESULTS ===")
+    print("Bopt:", result['Bopt'])
+    print("T:", result['T'])
+    print("L:", result['L'])
+    print("Feasable Values:", result['feasible_list'])

@@ -1,2 +1,4 @@
 *.out
 images/
+__pycache__/
+results/
