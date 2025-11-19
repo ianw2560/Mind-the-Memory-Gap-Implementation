@@ -34,8 +34,7 @@ def make_prompt(tokenizer, prompt_len):
 
     return tokenizer.decode(tokens, skip_special_tokens=False)
 
-def bytes_str(x):
-    """Convert bytes to megabytes"""
+def bytes_to_mb(x):
     return f"{x/1024/1024:.1f} MB"
 
 def save_results(result, filename="profiling_results.parquet"):
@@ -57,60 +56,42 @@ def save_results(result, filename="profiling_results.parquet"):
 
     df.to_parquet(filename)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
-    parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
-    parser.add_argument("--batch", type=int, default=1)
-    parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
-    parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
-    parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
-    args = parser.parse_args()
-
-    torch.manual_seed(42)
+def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_filename):
 
     # Set cuda as the default device
     device = "cuda"
 
-    # Login into HuggingFace for Llama models
-    login(token=os.getenv("HUGGINGFACE_KEY"))
-
-    # Check if cuda is available
-    if not torch.cuda.is_available():
-        print("CUDA is required for this project.")
-        exit(1)
-
     # Set dtype values
-    if args.dtype == "fp16":
+    if dtype_str == "fp16":
         dtype = torch.float16
-    elif args.dtype == "bf16":
+    elif dtype_str == "bf16":
         dtype = torch.bfloat16
-    elif args.dtype == "fp32":
+    elif dtype_str == "fp32":
         dtype = torch.float32
     else:
         dtype = None
 
-    print(f"[INFO] Loading model={args.model} dtype={args.dtype} device={device}")
-    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
+    print(f"[INFO] Loading model={model_name} dtype={dtype} device={device}")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     load_kwargs = {"device_map": device}
     if dtype is not None:
         load_kwargs["dtype"] = dtype
-    if args.dtype in ("int8","int4"):
+    if dtype in ("int8","int4"):
         # Quantized load
         from transformers import BitsAndBytesConfig
-        bnb_cfg = BitsAndBytesConfig(load_in_8bit=(args.dtype=="int8"),
-                                     load_in_4bit=(args.dtype=="int4"))
+        bnb_cfg = BitsAndBytesConfig(load_in_8bit=(dtype=="int8"),
+                                     load_in_4bit=(dtype=="int4"))
         load_kwargs["quantization_config"] = bnb_cfg
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, **load_kwargs)
+    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
     model.eval()
 
     # Build batch of prompts of desired token length
-    prompt_text = make_prompt(tokenizer, args.prompt_len)
-    batch_prompts = [prompt_text] * args.batch
+    prompt_text = make_prompt(tokenizer, prompt_len)
+    batch_prompts = [prompt_text] * batch
     enc = tokenizer(batch_prompts, return_tensors="pt", padding=True)
     input_ids = enc["input_ids"].to(device)
     attn_mask = enc["attention_mask"].to(device)
@@ -147,7 +128,7 @@ def main():
     #-------------------------------------------------------------------------------
     # Decode Stage
     #-------------------------------------------------------------------------------
-    gen_kwargs = dict(max_new_tokens=args.output_tokens, do_sample=False)
+    gen_kwargs = dict(max_new_tokens=output_tokens, do_sample=False)
     nvtx.range_push("decode")
     torch.cuda.synchronize()
     t2 = current_time_ms()
@@ -172,25 +153,25 @@ def main():
     #-------------------------------------------------------------------------------
     # Calculate metrics
     #-------------------------------------------------------------------------------
-    tokens = (args.prompt_len + args.output_tokens) * args.batch
+    tokens = (prompt_len + output_tokens) * batch
     tps = (tokens) / (decode_time / 1000.0)
 
     print("=== RESULTS ===")
-    print(f"BatchSize={args.batch} PromptLength={args.prompt_len} OutputTokens={args.output_tokens} DType={args.dtype}")
+    print(f"BatchSize={batch} PromptLength={prompt_len} OutputTokens={output_tokens} DType={dtype}")
     print(f"Prefill: {prefill_time:.1f} ms")
     print(f"Decode: {decode_time:.1f} ms")
     print(f"Decode throughput: {tps:.2f} tokens/sec")
-    print(f"Peak CUDA alloc: {bytes_str(peak_alloc)}")
+    print(f"Peak CUDA alloc: {bytes_to_mb(peak_alloc)}")
     if nvml_delta is not None:
-        print(f"NVML used delta: {bytes_str(nvml_delta)} (approx overall increase)")
+        print(f"NVML used delta: {bytes_to_mb(nvml_delta)} (approx overall increase)")
     print("===============")
 
     result = {
-        "model": args.model,
-        "dtype": args.dtype,
-        "batch": args.batch,
-        "output_tokens": args.output_tokens,
-        "prompt_len": args.prompt_len,
+        "model": model_name,
+        "dtype": dtype_str,
+        "batch": batch,
+        "output_tokens": output_tokens,
+        "prompt_len": prompt_len,
         "prefill_time": round(prefill_time, 3),
         "decode_time": round(decode_time, 3),
         "tokens_sec": round(tps, 3),
@@ -199,7 +180,41 @@ def main():
     }
 
     # Add results to existing DataFrame in parquet file
-    save_results(result)
+    save_results(result, output_filename)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
+    parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
+    parser.add_argument("--batch", type=int, default=1)
+    parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
+    parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
+    parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
+    parser.add_argument("--all", action='store_true', help="Iterate overall models from 1 to batch.")
+    args = parser.parse_args()
+
+    torch.manual_seed(42)
+
+    # Login into HuggingFace for Llama models
+    login(token=os.getenv("HUGGINGFACE_KEY"))
+
+    # Check if cuda is available
+    if not torch.cuda.is_available():
+        print("CUDA is required for this project.")
+        exit(1)
+
+    if not args.all:
+        profile_gpu(args.model, args.dtype, args.batch, args.prompt_len, args.output_tokens, args.output_filename)
+    else:
+        models = ["facebook/opt-1.3b", "facebook/opt-2.7b", "meta-llama/Llama-2-13b-hf", "meta-llama/Llama-2-7b-hf"]
+        batch_sizes = [1, 2, 4, 8]
+        prompt_len = 128
+        output_tokens = 256
+
+        for model in models:
+            for batch in batch_sizes:
+                profile_gpu(model, args.dtype, batch, prompt_len, output_tokens, args.output_filename)
+
 
 if __name__ == "__main__":
     main()
