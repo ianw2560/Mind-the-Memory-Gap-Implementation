@@ -18,19 +18,19 @@ except Exception:
 def current_time_ms():
     return time.time() * 1000.0
 
-def make_prompt(tokenizer, prompt_len):
+def make_prompt(tokenizer, input_tokens):
     
     # Create a test prompt
     prompt = "It is an ancient Mariner, And he stoppeth one of three. 'By thy long grey beard and glittering eye, Now wherefore stopp'st thou me?"
 
-    s = (prompt * ((prompt_len // len(tokenizer.encode(prompt))) + 2))
+    s = (prompt * ((input_tokens // len(tokenizer.encode(prompt))) + 2))
     tokens = tokenizer.encode(s)
 
-    # Pad/trim to ~prompt_len tokens
-    if len(tokens) < prompt_len:
-        tokens = tokens + [tokenizer.eos_token_id] * (prompt_len - len(tokens))
+    # Pad/trim to ~input_tokens tokens
+    if len(tokens) < input_tokens:
+        tokens = tokens + [tokenizer.eos_token_id] * (input_tokens - len(tokens))
     else:
-        tokens = tokens[:prompt_len]
+        tokens = tokens[:input_tokens]
 
     return tokenizer.decode(tokens, skip_special_tokens=False)
 
@@ -40,7 +40,7 @@ def bytes_to_mb(x):
 def save_results(result, filename="profiling_results.parquet"):
 
     # Create a key to get set of profiling results
-    new_row = pd.DataFrame([result]).set_index(["model", "dtype", "batch", "output_tokens", "prompt_len"])
+    new_row = pd.DataFrame([result]).set_index(["model", "dtype", "batch", "output_tokens", "input_tokens"])
 
     # Check if results already exist
     if os.path.exists(filename):
@@ -56,7 +56,7 @@ def save_results(result, filename="profiling_results.parquet"):
 
     df.to_parquet(filename)
 
-def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_filename):
+def profile_gpu(model_name, dtype_str, batch, input_tokens, output_tokens, output_filename):
 
     # Set cuda as the default device
     device = "cuda"
@@ -90,7 +90,7 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
     model.eval()
 
     # Build batch of prompts of desired token length
-    prompt_text = make_prompt(tokenizer, prompt_len)
+    prompt_text = make_prompt(tokenizer, input_tokens)
     batch_prompts = [prompt_text] * batch
     enc = tokenizer(batch_prompts, return_tensors="pt", padding=True)
     input_ids = enc["input_ids"].to(device)
@@ -153,7 +153,7 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
     #-------------------------------------------------------------------------------
     # Calculate metrics
     #-------------------------------------------------------------------------------
-    tokens = (prompt_len + output_tokens) * batch
+    tokens = (input_tokens + output_tokens) * batch
     tps = (tokens) / (decode_time / 1000.0)
 
     # Inter-token latency (ITL): average time between two generated tokens
@@ -161,7 +161,7 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
     inter_token_latency_ms  = decode_time / output_tokens
 
     print("=== RESULTS ===")
-    print(f"BatchSize={batch} PromptLength={prompt_len} OutputTokens={output_tokens} DType={dtype}")
+    print(f"BatchSize={batch} PromptLength={input_tokens} OutputTokens={output_tokens} DType={dtype}")
     print(f"Prefill: {prefill_time:.1f} ms")
     print(f"Decode: {decode_time:.1f} ms")
     print(f"Decode throughput: {tps:.2f} tokens/sec")
@@ -176,7 +176,7 @@ def profile_gpu(model_name, dtype_str, batch, prompt_len, output_tokens, output_
         "dtype": dtype_str,
         "batch": batch,
         "output_tokens": output_tokens,
-        "prompt_len": prompt_len,
+        "input_tokens": input_tokens,
         "prefill_time": round(prefill_time, 3),
         "decode_time": round(decode_time, 3),
         "tokens_sec": round(tps, 3),
@@ -193,7 +193,7 @@ def main():
     parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
     parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
     parser.add_argument("--batch", type=int, default=1)
-    parser.add_argument("--prompt_len", type=int, default=1024, help="Number of input tokens")
+    parser.add_argument("--input_tokens", type=int, default=1024, help="Number of input tokens")
     parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
     parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
     parser.add_argument("--all", action='store_true', help="Iterate overall models from 1 to batch.")
@@ -210,16 +210,16 @@ def main():
         exit(1)
 
     if not args.all:
-        profile_gpu(args.model, args.dtype, args.batch, args.prompt_len, args.output_tokens, args.output_filename)
+        profile_gpu(args.model, args.dtype, args.batch, args.input_tokens, args.output_tokens, args.output_filename)
     else:
         models = ["facebook/opt-1.3b", "facebook/opt-2.7b", "meta-llama/Llama-2-13b-hf", "meta-llama/Llama-2-7b-hf"]
         batch_sizes = [1, 2, 4, 8]
-        prompt_len = 128
+        input_tokens = 128
         output_tokens = 256
 
         for model in models:
             for batch in batch_sizes:
-                profile_gpu(model, args.dtype, batch, prompt_len, output_tokens, args.output_filename)
+                profile_gpu(model, args.dtype, batch, input_tokens, output_tokens, args.output_filename)
 
 
 if __name__ == "__main__":

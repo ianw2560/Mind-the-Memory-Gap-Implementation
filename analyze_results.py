@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+def plot_batchsize_vs_time(model, dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
     df = pd.read_parquet(parquet_filename)
 
@@ -11,7 +11,7 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_file
 
     idx = pd.IndexSlice
 
-    sub = df.loc[idx[model, dtype, :, output_tokens, prompt_len], :]
+    sub = df.loc[idx[model, dtype, :, output_tokens, input_tokens], :]
     batch_sizes = sub.index.get_level_values("batch")
 
     prefill_times = []
@@ -19,7 +19,7 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_file
 
     rows = []
     for i in batch_sizes:
-        rows.append( (model, dtype, i, output_tokens, prompt_len) )
+        rows.append( (model, dtype, i, output_tokens, input_tokens) )
 
     for i in range(len(batch_sizes)):
         prefill_times.append(df.loc[rows[i]]["prefill_time"])
@@ -46,14 +46,14 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_file
     plt.savefig(f"{save_dir}/{model_name}_batchsize_vs_time.png", dpi=300)
 
 
-def plot_throughput_vs_batchsize(dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
     df = pd.read_parquet(parquet_filename)
 
-    # Filter on dtype, output_tokens, prompt_len
+    # Filter on dtype, output_tokens, input_tokens
     sub_all = df.xs(
-        (dtype, output_tokens, prompt_len),
-        level=("dtype", "output_tokens", "prompt_len")
+        (dtype, output_tokens, input_tokens),
+        level=("dtype", "output_tokens", "input_tokens")
     )
 
     models = sub_all.index.get_level_values("model").unique()
@@ -82,30 +82,30 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, prompt_len, parquet_filen
     plt.close(fig)
 
 
-def create_plots(dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+def create_plots(dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
     os.makedirs(save_dir, exist_ok=True)
 
     df = pd.read_parquet(parquet_filename)
     
-    # Filter on dtype, output_tokens, prompt_len
+    # Filter on dtype, output_tokens, input_tokens
     sub_all = df.xs(
-        (dtype, output_tokens, prompt_len),
-        level=("dtype", "output_tokens", "prompt_len")
+        (dtype, output_tokens, input_tokens),
+        level=("dtype", "output_tokens", "input_tokens")
     )
 
     models = sub_all.index.get_level_values("model").unique()
 
     for m in models:
-        plot_batchsize_vs_time(m, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+        plot_batchsize_vs_time(m, dtype, output_tokens, input_tokens, parquet_filename, save_dir)
 
 
-    plot_throughput_vs_batchsize(dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+    plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_filename, save_dir)
 
 
 create_plots(
     dtype="fp16",
-    prompt_len=128,
+    input_tokens=128,
     output_tokens=256,
     parquet_filename="batchsize_1-256_128_256_newton.parquet",
     save_dir="images",
