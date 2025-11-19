@@ -42,64 +42,71 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_file
     ax.legend()
     plt.tight_layout()
 
-    plt.savefig(f"{save_dir}/batchsize_vs_time.png", dpi=300)
+    model_name = model.split("/")[-1]
+    plt.savefig(f"{save_dir}/{model_name}_batchsize_vs_time.png", dpi=300)
 
-def plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+
+def plot_throughput_vs_batchsize(dtype, output_tokens, prompt_len, parquet_filename, save_dir):
 
     df = pd.read_parquet(parquet_filename)
 
-    model_name = model.split("/")[1]
+    # Filter on dtype, output_tokens, prompt_len
+    sub_all = df.xs(
+        (dtype, output_tokens, prompt_len),
+        level=("dtype", "output_tokens", "prompt_len")
+    )
 
-    idx = pd.IndexSlice
+    models = sub_all.index.get_level_values("model").unique()
 
-    sub = df.loc[idx[model, dtype, :, output_tokens, prompt_len], :]
-    batch_sizes = sub.index.get_level_values("batch")
+    fig, ax = plt.subplots(figsize=(6, 3.5))
 
-    throughputs = []
+    for m in models:
+        sub_m = sub_all.xs(m, level="model").sort_index(level="batch")
+        batch_sizes = sub_m.index.get_level_values("batch")
+        throughputs = sub_m["tokens_sec"]
 
-    rows = []
-    for i in batch_sizes:
-        rows.append( (model, dtype, i, output_tokens, prompt_len) )
+        label = m.split("/")[-1]
+        ax.plot(batch_sizes, throughputs, marker="o", label=label)
 
-    for i in range(len(batch_sizes)):
-        throughputs.append(df.loc[rows[i]]["tokens_sec"])
-
-    x = batch_sizes #np.arange(len(batch_sizes))
-
-    fig, ax = plt.subplots(figsize=(4, 3.5))
-
-    ax.plot(x, throughputs, label=f"{model_name}", marker="o")
-
-    ax.set_xlabel("Average Batch Size")
-    ax.set_ylabel("Throughput (token/sec))")
-    ax.set_title("Throughput vs Batchsize (NVIDIA H100)") 
-
-    # ax.set_xticks(x)
-    # ax.set_xticklabels(batch_sizes)
+    ax.set_xlabel("Batch Size")
+    ax.set_ylabel("Throughput (tokens/sec)")
+    ax.set_title("Throughput vs Batch Size (NVIDIA H100)")
     ax.set_xlim(0, 600)
-    ax.set_xticks(np.arange(0, 601, 100))
+    ax.set_xticks(np.arange(0, 301, 100))
 
     ax.legend()
     plt.tight_layout()
 
+    os.makedirs(save_dir, exist_ok=True)
     plt.savefig(f"{save_dir}/throughput_vs_batchsize.png", dpi=300)
+    plt.close(fig)
 
 
-def create_plots(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir):
+def create_plots(dtype, output_tokens, prompt_len, parquet_filename, save_dir):
 
     os.makedirs(save_dir, exist_ok=True)
 
-    plot_batchsize_vs_time(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
-    plot_throughput_vs_batchsize(model, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
+    df = pd.read_parquet(parquet_filename)
+    
+    # Filter on dtype, output_tokens, prompt_len
+    sub_all = df.xs(
+        (dtype, output_tokens, prompt_len),
+        level=("dtype", "output_tokens", "prompt_len")
+    )
+
+    models = sub_all.index.get_level_values("model").unique()
+
+    for m in models:
+        plot_batchsize_vs_time(m, dtype, output_tokens, prompt_len, parquet_filename, save_dir)
 
 
+    plot_throughput_vs_batchsize(dtype, output_tokens, prompt_len, parquet_filename, save_dir)
 
 
 create_plots(
-    model="facebook/opt-1.3b",
     dtype="fp16",
     prompt_len=128,
     output_tokens=256,
-    parquet_filename="profiling_results.parquet",
+    parquet_filename="batchsize_1-256_128_256_newton.parquet",
     save_dir="images",
 )
