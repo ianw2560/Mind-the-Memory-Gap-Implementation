@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
-import os, time, csv, argparse, math
+import os
+import time
+import argparse
 import torch
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch.cuda.nvtx as nvtx
 import pandas as pd
@@ -193,7 +196,7 @@ def main():
     parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
     parser.add_argument("--dtype", type=str, default="fp16", choices=["fp16","bf16","fp32","int8","int4"])
     parser.add_argument("--batch", type=int, default=1)
-    parser.add_argument("--input_tokens", type=int, default=1024, help="Number of input tokens")
+    parser.add_argument("--input_tokens", type=int, default=128, help="Number of input tokens")
     parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
     parser.add_argument("--output_filename", type=str, default="profiling_results.parquet")
     parser.add_argument("--all", action='store_true', help="Iterate overall models from 1 to batch.")
@@ -212,14 +215,17 @@ def main():
     if not args.all:
         profile_gpu(args.model, args.dtype, args.batch, args.input_tokens, args.output_tokens, args.output_filename)
     else:
-        models = ["facebook/opt-1.3b", "facebook/opt-2.7b", "meta-llama/Llama-2-13b-hf", "meta-llama/Llama-2-7b-hf"]
-        batch_sizes = [1, 2, 4, 8]
+        models = ["facebook/opt-1.3b" , "facebook/opt-2.7b", "meta-llama/Llama-2-13b-hf", "meta-llama/Llama-2-7b-hf"]
+        batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
         input_tokens = 128
         output_tokens = 256
 
         for model in models:
             for batch in batch_sizes:
-                profile_gpu(model, args.dtype, batch, input_tokens, output_tokens, args.output_filename)
+                try:
+                    profile_gpu(model, args.dtype, batch, input_tokens, output_tokens, args.output_filename)
+                except torch.OutOfMemoryError:
+                    continue
 
 
 if __name__ == "__main__":
