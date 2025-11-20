@@ -56,6 +56,21 @@ def calculate_b_opt(batch_sizes, T_values, L_values, SLO, eps=0.1, tol=1e-3):
     }
 
 
+def estimate_slo(batch_sizes, latencies, factor=2.0):
+    B = np.asarray(batch_sizes)
+    L = np.asarray(latencies)
+
+    idx1 = np.where(B == 1)[0]
+    if idx1.size > 0:
+        base_latency = L[idx1[0]]
+    else:
+        minB = B.min()
+        base_latency = L[np.where(B == minB)[0][0]]
+
+    est_slo = float(base_latency * factor)
+
+    return est_slo
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="facebook/opt-1.3b", help="Model to use")
@@ -63,11 +78,10 @@ if __name__ == "__main__":
     parser.add_argument("--input_tokens", type=int, default=128, help="Number of input tokens")
     parser.add_argument("--output_tokens", type=int, default=256, help="Number of output tokens to generate")
     parser.add_argument("--input_filename", type=str, default="profiling_results.parquet")
-    parser.add_argument("--all", action='store_true', help="Iterate overall models from 1 to batch.")
+    parser.add_argument("--slo", type=float, default=None)
     args = parser.parse_args()
 
-    # BCA User Parameters    
-    SLO = 10.0 #25.0
+    # BCA User Parameters
     eps = 0.1
 
     # Read in GPU profiling data
@@ -81,13 +95,18 @@ if __name__ == "__main__":
 
     batch_sizes = model_df.index.to_numpy()
     latencies = model_df["inter_token_latency_ms"].to_numpy()
-    decode_times = model_df["decode_time"].to_numpy()
+    throghputs = model_df["tokens_sec"].to_numpy()
 
-    print(batch_sizes)
-    print(latencies)
-    print(decode_times)
+    # Either calculate SLO or get from CLI args
+    if args.slo is None:
+        SLO = estimate_slo(batch_sizes, latencies, 4.0)
+    else:
+        SLO = args.slo
 
-    result = calculate_b_opt(batch_sizes, decode_times, latencies, SLO, eps)
+    print("SLO:", SLO)
+    print("eps:", eps)
+
+    result = calculate_b_opt(batch_sizes, throghputs, latencies, SLO, eps)
 
     print("=== RESULTS ===")
     print("Bopt:", result['Bopt'])
