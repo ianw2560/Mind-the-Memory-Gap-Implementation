@@ -2,10 +2,10 @@
 
 import pandas as pd
 
-df = pd.read_parquet("final_results.parquet")
+df = pd.read_parquet("profiling_results.parquet")
 # df = df.sort_index()
-print(df.index.nlevels)   # probably 5
-print(df.index.names) 
+# print(df.index.nlevels)   # probably 5
+# print(df.index.names) 
 
 
 # If it has 5 levels and the last one is unnamed, name it.

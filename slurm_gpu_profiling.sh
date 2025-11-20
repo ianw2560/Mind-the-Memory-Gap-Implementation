@@ -6,4 +6,4 @@
 #SBATCH --time=2:00:00
 #SBATCH -o batchsize_%j.out
 
-python profiler.py --all
+time python profiler.py --all
