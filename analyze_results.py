@@ -115,7 +115,7 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
     latencies = np.array(latencies, dtype=float)
     throughputs = np.array(throughputs, dtype=float)
 
-    fig, ax = plt.subplots(figsize=(4, 4))
+    fig, ax = plt.subplots(figsize=(5, 4))
 
     # Throughput vs latency curve (default matplotlib color & style)
     ax.plot(latencies, throughputs, marker="o")
@@ -145,6 +145,89 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
     plt.close(fig)
 
 
+def print_tradeoff_table(model, dtype, output_tokens, input_tokens,
+                         parquet_filename, gpu_mem_bytes=None,
+                         slo_multiplier=2.0, eps=0.1):
+    """
+    Prints & returns a DataFrame comparing percent of max throughput vs
+    percent of GPU memory used by peak_alloc (in GB), and highlights B_opt.
+    """
+    import numpy as np
+    import pandas as pd
+
+    GB = 1024 ** 3  # GiB
+
+    # Try to detect total GPU memory if not given
+    if gpu_mem_bytes is None:
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            h = pynvml.nvmlDeviceGetHandleByIndex(0)
+            gpu_mem_bytes = pynvml.nvmlDeviceGetMemoryInfo(h).total
+        except Exception:
+            gpu_mem_bytes = np.nan  # will yield NaN % if we can't fetch it
+
+    # Load + slice
+    df = pd.read_parquet(parquet_filename)
+    idx = pd.IndexSlice
+    sub = df.loc[idx[model, dtype, :, output_tokens, input_tokens], :].reset_index()
+    sub = sub.sort_values("batch")
+
+    # % of max throughput
+    tps_max = sub["tokens_sec"].max()
+    sub["throughput_pct_of_max"] = 100.0 * sub["tokens_sec"] / tps_max
+
+    # Peak alloc in GB (two decimals when printing)
+    sub["peak_alloc_gb"] = sub["peak_alloc_bytes"] / GB
+
+    # % of total GPU memory (peak_alloc proxy)
+    if np.isfinite(gpu_mem_bytes) and gpu_mem_bytes > 0:
+        sub["peak_alloc_pct_of_gpu"] = 100.0 * sub["peak_alloc_bytes"] / gpu_mem_bytes
+    else:
+        sub["peak_alloc_pct_of_gpu"] = np.nan
+
+    # Compute B_opt under SLO
+    batches = sub["batch"].to_numpy()
+    lats    = sub["inter_token_latency_ms"].to_numpy()
+    tps     = sub["tokens_sec"].to_numpy()
+
+    slo = estimate_slo(batches, lats, slo_multiplier)
+    bopt = calculate_b_opt(batches, tps, lats, slo, eps)["Bopt"]
+    sub["is_Bopt"] = (sub["batch"] == bopt)
+
+    # Pretty print a compact table
+    cols = ["batch", "tokens_sec", "throughput_pct_of_max",
+            "peak_alloc_gb", "peak_alloc_pct_of_gpu",
+            "inter_token_latency_ms", "is_Bopt"]
+    table = sub[cols].copy()
+
+    def _fmt_pct(x): return f"{x:.2f}%" if pd.notna(x) else "NaN"
+    def _fmt_gb(x): return f"{x:.2f} GB" if pd.notna(x) else "NaN"
+
+    model_name = model.split("/")[-1]
+    print(f"\n=== Throughput vs Peak-Alloc Trade-off ({model_name}) ===")
+    print(table.to_string(
+        index=False,
+        formatters={
+            "throughput_pct_of_max": _fmt_pct,
+            "peak_alloc_gb": _fmt_gb,
+            "peak_alloc_pct_of_gpu": _fmt_pct
+        }
+    ))
+
+    # One-line summary in the paper's style (GB)
+    row_opt = table.loc[table["is_Bopt"]].iloc[0]
+    tps_pct = row_opt["throughput_pct_of_max"]
+    mem_pct = row_opt["peak_alloc_pct_of_gpu"]
+    gpu_total_gb = (gpu_mem_bytes / GB) if np.isfinite(gpu_mem_bytes) else np.nan
+    print(f"\nB_opt = {int(bopt)} achieves {tps_pct:.2f}% of max throughput "
+          f"while using {mem_pct:.2f}% of GPU memory (peak_alloc). "
+          f"[peak_alloc={row_opt['peak_alloc_gb']:.2f} GB, "
+          f"GPU total={(f'{gpu_total_gb:.2f} GB' if np.isfinite(gpu_total_gb) else 'NaN')}]")
+
+    return table
+
+
 def create_plots(dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
     os.makedirs(save_dir, exist_ok=True)
@@ -162,6 +245,13 @@ def create_plots(dtype, output_tokens, input_tokens, parquet_filename, save_dir)
     for m in models:
         plot_batchsize_vs_time(m, dtype, output_tokens, input_tokens, parquet_filename, save_dir)
         plot_throughput_vs_latency(m, dtype, output_tokens, input_tokens, parquet_filename, save_dir)
+        print_tradeoff_table(
+            m, dtype, output_tokens, input_tokens,
+            parquet_filename,   # same file you already pass around
+            gpu_mem_bytes=8e10, # or pass an int if you want to fix it
+            slo_multiplier=2.0,
+            eps=0.1
+        )
 
 
     plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_filename, save_dir)
