@@ -1,0 +1,12 @@
+*.out
+images/
+__pycache__/
+results/
+*.aux
+*.out
+*.pdf
+*.toc
+*.log
+*.fls
+*.fdb_latexmk
+
