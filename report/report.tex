@@ -34,12 +34,20 @@
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
-% \geometry{
-%   a4paper,
-%   margin=1in
-% }
+\geometry{
+  a4paper,
+  margin=1in
+}
 
 \title{GPU Profiling and an Implementation of a Batching Configuration Advisor for LLM Inference}
+
+\makeatletter
+\newcommand{\linebreakand}{
+  \end{@IEEEauthorhalign}
+  \hfill\mbox{}\par
+  \mbox{}\hfill\begin{@IEEEauthorhalign}
+}
+\makeatother
 
 \author{
 \IEEEauthorblockN{Ian Wallace}
@@ -59,7 +67,7 @@ ia106173@ucf.edu}
 \textit{University of Central Florida}\\
 Orlando, Florida \\
 ia106173@ucf.edu}
-\and
+\linebreakand
 \IEEEauthorblockN{Russell Ridley}
 \IEEEauthorblockA{\textit{Department of ECE} \\
 \textit{University of Central Florida}\\
