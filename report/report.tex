@@ -1,36 +1,134 @@
-\documentclass[11pt]{article}
+\documentclass[conference, onecolumn]{IEEEtran}
 
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage{geometry}
+% \usepackage[utf8]{inputenc}
+% \usepackage[T1]{fontenc}
+% \usepackage{lmodern}
+% \usepackage{geometry}
+% \usepackage{graphicx}
+% \usepackage{amsmath, amssymb}
+% \usepackage{booktabs}
+% \usepackage{caption}
+% \usepackage{subcaption}
+% \usepackage{hyperref}
+% \usepackage{fancyhdr}
+% \usepackage{siunitx}
+% \usepackage{xcolor}
+% \usepackage{listings}
+% \usepackage{tabularx,booktabs,array}
+% \newcolumntype{Y}{>{\raggedleft\arraybackslash}X}
+% \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+%     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
 \usepackage{graphicx}
-\usepackage{amsmath, amssymb}
-\usepackage{booktabs}
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{hyperref}
-\usepackage{fancyhdr}
-\usepackage{siunitx}
+\usepackage{textcomp}
 \usepackage{xcolor}
-\usepackage{listings}
 \usepackage{tabularx,booktabs,array}
-\newcolumntype{Y}{>{\raggedleft\arraybackslash}X} % right-aligned, wrapping
+\newcolumntype{Y}{>{\raggedleft\arraybackslash}X}
 
-\geometry{
-  a4paper,
-  margin=1in
+\usepackage[T1]{fontenc}
+\usepackage{courier}  % sets \ttfamily to Courier
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% \geometry{
+%   a4paper,
+%   margin=1in
+% }
+
+\title{GPU Profiling and an Implementation of a Batching Configuration Advisor for LLM Inference}
+
+\author{
+\IEEEauthorblockN{Ian Wallace}
+\IEEEauthorblockA{\textit{Department of ECE} \\
+\textit{University of Central Florida}\\
+Orlando, Florida \\
+ia106173@ucf.edu}
+\and
+\IEEEauthorblockN{Lucas Califano}
+\IEEEauthorblockA{\textit{Department of ECE} \\
+\textit{University of Central Florida}\\
+Orlando, Florida \\
+ia106173@ucf.edu}
+\and
+\IEEEauthorblockN{Ryan Baumgartner}
+\IEEEauthorblockA{\textit{Department of ECE} \\
+\textit{University of Central Florida}\\
+Orlando, Florida \\
+ia106173@ucf.edu}
+\and
+\IEEEauthorblockN{Russell Ridley}
+\IEEEauthorblockA{\textit{Department of ECE} \\
+\textit{University of Central Florida}\\
+Orlando, Florida \\
+ia106173@ucf.edu}
+\and
+\IEEEauthorblockN{Patrick Rizkalla}
+\IEEEauthorblockA{\textit{Department of ECE} \\
+\textit{University of Central Florida}\\
+Orlando, Florida \\
+ia106173@ucf.edu}
 }
 
-\title{Reinforcement Learning Adaptive Cruise Control Report}
-\author{Ian Wallace}
-\date{\today}
 
 \begin{document}
 
-\begin{equation}
-\text{Throughput} = \frac{( \text{input\_tokens + output\_tokens} ) \times \text{batch\_size} }{ \text{decode\_time} } \\
-\end{equation}
+\maketitle
+
+\begin{abstract}
+Large Language Models (LLMs) show high inference costs due to the nature of autoregressive token generation. This forces GPUs into memory-bound execution, despite the large compute capability. Recent work in Mind the Memory Gap (Recasens et al., 2025) determines DRAM bandwidth saturation as the main bottleneck in large-batch LLM inference and proposes the Batching Configuration Advisor (BCA) as a scheduling method that selects the best batch size, optimizing throughput, memory usage, and latency. 
+
+In this paper, we replicate and expand upon the authors' analysis using the University of Central Florida's Advanced Research Computing Center (UCF ARCC) Newton computing cluster. On the cluster, we implement a GPU profiler that measures prefill and decode latency, throughput scaling, peak GPU memory allocation, and batch-size effects across multiple LLMs (OPT-1.3B, OPT-2.7B, Llama-2-7B, Llama-2-13B). Our results confirm that decode dominates runtime and becomes memory-bound at larger batch sizes, which is consistent with the findings in the original paper. We also implemented our own adaption of the BCA using collected profile data and identifying optimal batch sizes that ….. 
+
+Our reproduction of the GPU profiler and BCA validates the core claim that DRAM bandwidth, rather than compute, is the limiting factor in large-batch LLM inference. Our implementation demonstrates that the BCA provides the proper batch-size optimization on real hardware and can reduce memory footprint enough for multi-replica execution and improved throughput per GPU The total profiling and BCA workflow offer a practical approach for the configuration of high-efficiency LLM pipelines. 
+\end{abstract}
+
+\section{Introduction}
+
+The rapid scaling of LLMs has led to increasing demand for efficient inference on modern GPU hardware. Despite architectural advances in accelerators, LLM inference remains costly due to the nature of autoregressive token generation. In contrast to training where parallelism can be used across batches and sequence dimensions, inference requires producing one token at a time. Each generated token depends on all the previous tokens, causing frequent accesses to the key-value (KV) cache stored in high-bandwidth memory. As a result, the GPU becomes memory-bound, rather than being able to fully utilize its compute capability. 
+
+Batching is the common technique to improve inference throughput by processing multiple user requests simultaneously. While batching can improve hardware usage and limit memory stalls, it is only effective up to a “knee point”. Beyond this point, additional batching does not yield linear throughput gains, GPU compute units remain underutilized due to memory bandwidth saturation, and latency increases. This is why determining an appropriate batch size is essential for balancing throughput, memory usage, and latency in LLM environments.  
+
+Mind the Memory Gap (2025) profiles the LLM inference and identifies DRAM bandwidth as the main bottleneck during the decode phase of token generation. The paper shows that attention kernels become constrained by memory as batch size grows, which leads to substantial idle time in GPU warps. To address this, the authors proposed the Batching Configuration Advisor (BCA) as an offline scheduling algorithm that selects the optimal batch size based on the measured throughput and latency parameters. 
+
+In this paper, we planned to replicate the authors' analysis using the University of Central Florida's Advanced Research Computing Center (UCF ARCC) Newton cluster, running on the NVIDIA Tesla H100 80GB GPUs. This GPU is similar to the H100 SXM 64GB that the original paper utilizes, which has a higher memory bandwidth. We implement a custom GPU profiler that measures prefill and decode latency, inter-token throughput, and peak memory usage across a range of batch sizes across 4 different model architectures (OPT-1.3B, OPT-2.7B, Llama-2-7B, Llama-2-13B). Using this data, we implement our own adaptation of the BCA to evaluate how batch-size selection memory efficiency and throughput on real hardware. Our reproduction of the paper confirms the paper's findings. Specifically, we found that decode overwhelmingly dominates inference runtime, throughput saturates at larger batch sizes because of the DRAM bandwidth, and GPUs operate with substantial underutilized compute capacity. Additionally, our BCA implementation demonstrates that higher performance efficiency can be achieved with smaller batch sizes that the maximum supported, which as a result reduces memory usage and enables the possibility of deploying multiple model replicas on a single GPU. 
+
+\section{Background}
+
+\section{Methodology}
+
+We conduct out experiments using .......??? We employ this framework in an offline mode where prefill and decode steps are executed using... ??? 
+
+Hardware: All experiments were conducted on the UCF ARCC Newton Cluster with a NVIDIA Tesla H100 80GB, 16GB of memory, and 10CPUs. 
+
+Models: We implemented and evaluated GPU profiling and the BCA using four models: OPT-1.3B, OPT-2.7B, Llama-2-7B, and Llama-2-13B. All models fit within the 64GB GPU. 
+
+\subsection{GPU Profiling}
+
+\subsection{Batching Configuration Advisor}
+
+\section{Results}
+
+We present a comprehensive evaluation of LLM serving performance, analyzing GPU profiling and batching analysis to understand system behavior across varying workloads. Our experiments measure throughput, latency, and memory usage under different batch sizes and input-output configurations, providing insights into performance bottlenecks and resource utilization. These results form the basis for identifying optimal configurations and assessing the effectiveness of strategies such as the Batching Configuration Advisor. 
+
+\subsection{GPU Profiling}
+
+\subsection{Batching Configuration Advisor}
+
+Our implementation of the Batching Configuration Advisor successfully identified an optimal batch size that balances throughput, latency, and memory efficiency. Across the evaluated batch sizes, the BCA computed optimal batch achieved 84.89\% of the maximum observed throughput while requiring only 12.58\% of the GPU memory used at the maximum batch configuration. This demonstrates that the batching configuration advisor selects a batch size located the throughput plateau, avoiding inefficient knee points where increasing the batch size yields only marginal throughput improvements. 
+
+Despite relying on peak memory allocation rather than detailed KV cache profiling, the measured savings are substantial. In practice, KV cache usage would represent an even larger fraction of the memory footprint, supporting the idea that the true memory efficiency gains of the BCA selected batch size are likely higher than reported. The batching configuration advisor enforced the user specified ε and SLO values. The results validate the effectiveness of the BCA methodology. By eliminating unnecessary KV cache allocation and preventing operation in the plateau region, BCA improves memory availability for additional workloads, reduces inter-token latency, and maintains high throughput. These improvements demonstrate that BCA is a practical and efficient offline tool for tuning LLM serving systems especially in environments where GPU memory is scarce or multiple concurrent workloads must share compute resources.
+
+\section{Conclusion}
+
+Our project has successfully reproduced the findings from the authors and created a practical version of the BCA. Using the UCF ARCC Newton cluster on four different LLMS, we have verified that the decode phase dominated inference time and becomes memory-bounded at larger batch sizes, which was consistent with the results that the original authors produced. The GPU profiling clearly showed the expected throughput knee-point and saturation behavior that occurs once the DRAM bandwidth becomes the limiting factor. In addition to matching their observations, our profiling made it more apparent that the SPU compute units remained largely underutilized even as the batch size increased, which confirmed that the performance stalls are driving my memory contention rather than arithmetic workload. The behavior was visible across all the LLM models, which reinforces the idea that the bottleneck is coming from the frequent KV-cache reads. 
+
+The BCA we developed used these observations to select batch sizes that maximize throughput while staying out of the plateau region. Our results showed that high throughput can be maintained while using only a small fraction of the memory that is consumed at the maximum batch size. This makes it clear that the default approach to serving, where the system allocates the largest batch that fits in memory, leads to unnecessary memory usage and minimal improvement in performance. By identifying the smallest batch size that still reaches near-peak throughput, the BCA highlights how much GPU memory is typically left sitting unused in standard configurations. This extra memory capacity has practical value. It can be repurposed to run additional model replicas on the same GPU, support more users at the same time, or handle larger prompts without hurting performance. This shows that batching choices guided by real profiling data, rather than fixed limits or estimates, which can noticeably improve the performance of LLM inference pipelines. 
+
+In the end, our implementation confirms the results and conclusion the original work and demonstrates that both GPU profiling and batch optimization can be reproduced in a practical setting. By validating the memory-bound nature of LLM inference and showing that optimized batching strategies lead to an improvement in memory performance along with throughput, this project establishes a practical workflow that helps evaluate and enhance how LLMs are served on modern GPU hardware. The combined profiling results and BCA implementation give a clear roadmap for future enhancements, including integrating deeper kernel-level analysis and expanding the system to support multi-replica configurations. Overall, this work shows that careful measurement and informed batching choices have a direct impact on throughput, latency, and resource efficiency in modern LLMs. 
 
 % OPT-1.3B
 \begin{table}[htbp]
