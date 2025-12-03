@@ -23,6 +23,7 @@
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
 \usepackage{graphicx}
+\usepackage[margin=1in]{geometry}
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{tabularx,booktabs,array}
@@ -34,10 +35,6 @@
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
-\geometry{
-  a4paper,
-  margin=1in
-}
 
 \title{GPU Profiling and an Implementation of a Batching Configuration Advisor for LLM Inference}
 
@@ -102,9 +99,20 @@ Batching is the common technique to improve inference throughput by processing m
 
 Mind the Memory Gap (2025) profiles the LLM inference and identifies DRAM bandwidth as the main bottleneck during the decode phase of token generation. The paper shows that attention kernels become constrained by memory as batch size grows, which leads to substantial idle time in GPU warps. To address this, the authors proposed the Batching Configuration Advisor (BCA) as an offline scheduling algorithm that selects the optimal batch size based on the measured throughput and latency parameters. 
 
-In this paper, we planned to replicate the authors' analysis using the University of Central Florida's Advanced Research Computing Center (UCF ARCC) Newton cluster, running on the NVIDIA Tesla H100 80GB GPUs. This GPU is similar to the H100 SXM 64GB that the original paper utilizes, which has a higher memory bandwidth. We implement a custom GPU profiler that measures prefill and decode latency, inter-token throughput, and peak memory usage across a range of batch sizes across 4 different model architectures (OPT-1.3B, OPT-2.7B, Llama-2-7B, Llama-2-13B). Using this data, we implement our own adaptation of the BCA to evaluate how batch-size selection memory efficiency and throughput on real hardware. Our reproduction of the paper confirms the paper's findings. Specifically, we found that decode overwhelmingly dominates inference runtime, throughput saturates at larger batch sizes because of the DRAM bandwidth, and GPUs operate with substantial underutilized compute capacity. Additionally, our BCA implementation demonstrates that higher performance efficiency can be achieved with smaller batch sizes that the maximum supported, which as a result reduces memory usage and enables the possibility of deploying multiple model replicas on a single GPU. 
+In this paper, we planned to replicate the authors' analysis using the University of Central Florida's Advanced Research Computing Center (UCF ARCC) Newton cluster, running on the NVIDIA Tesla H100 80GB GPUs. This GPU is similar to the H100 SXM 64GB that the original paper utilizes, which has a higher memory bandwidth. We implement a custom GPU profiler that measures prefill and decode latency, inter-token throughput, and peak memory usage across a range of batch sizes across four different model architectures (OPT-1.3B, OPT-2.7B, Llama-2-7B, Llama-2-13B). Using this data, we implement our own adaptation of the BCA to evaluate how batch-size selection memory efficiency and throughput on real hardware. Our reproduction of the paper confirms the paper's findings. Specifically, we found that decode overwhelmingly dominates inference runtime, throughput saturates at larger batch sizes because of the DRAM bandwidth, and GPUs operate with substantial underutilized compute capacity. Additionally, our BCA implementation demonstrates that higher performance efficiency can be achieved with smaller batch sizes that the maximum supported, which as a result reduces memory usage and enables the possibility of deploying multiple model replicas on a single GPU. 
 
 \section{Background}
+
+\begin{equation}
+B_{\mathrm{opt}}
+= \operatorname*{arg\,max}_{B}\; T(B)
+\qquad
+\text{subject to}\quad
+\begin{cases}
+L(B) \le \mathrm{SLO},\\[4pt]
+\dfrac{T(B)}{B * T(1)} > \varepsilon
+\end{cases}
+\end{equation}
 
 \section{Methodology}
 
@@ -126,25 +134,42 @@ We present a comprehensive evaluation of LLM serving performance, analyzing GPU 
 
 \subsection{Batching Configuration Advisor}
 
+\begin{figure}[h!]
+  \centering
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/opt-1.3b_throughput_vs_latency.png}
+    %\caption*{(a) SAC}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/opt-2.7b_throughput_vs_latency.png}
+    %\caption*{(b) PPO}
+  \end{minipage}
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/Llama-2-7b-hf_throughput_vs_latency.png}
+    %\caption*{(c) TD3}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.49\textwidth}
+    \includegraphics[width=\textwidth]{../images/Llama-2-13b-hf_throughput_vs_latency.png}
+    %\caption*{(d) DDPG}
+  \end{minipage}
+  \caption{The throughput vs latency plot for all four models.}
+  \label{fig:best_following_distance}
+\end{figure}
+
+
 Our implementation of the Batching Configuration Advisor successfully identified an optimal batch size that balances throughput, latency, and memory efficiency. Across the evaluated batch sizes, the BCA computed optimal batch achieved 84.89\% of the maximum observed throughput while requiring only 12.58\% of the GPU memory used at the maximum batch configuration. This demonstrates that the batching configuration advisor selects a batch size located the throughput plateau, avoiding inefficient knee points where increasing the batch size yields only marginal throughput improvements. 
 
 Despite relying on peak memory allocation rather than detailed KV cache profiling, the measured savings are substantial. In practice, KV cache usage would represent an even larger fraction of the memory footprint, supporting the idea that the true memory efficiency gains of the BCA selected batch size are likely higher than reported. The batching configuration advisor enforced the user specified ε and SLO values. The results validate the effectiveness of the BCA methodology. By eliminating unnecessary KV cache allocation and preventing operation in the plateau region, BCA improves memory availability for additional workloads, reduces inter-token latency, and maintains high throughput. These improvements demonstrate that BCA is a practical and efficient offline tool for tuning LLM serving systems especially in environments where GPU memory is scarce or multiple concurrent workloads must share compute resources.
 
-\section{Conclusion}
-
-Our project has successfully reproduced the findings from the authors and created a practical version of the BCA. Using the UCF ARCC Newton cluster on four different LLMS, we have verified that the decode phase dominated inference time and becomes memory-bounded at larger batch sizes, which was consistent with the results that the original authors produced. The GPU profiling clearly showed the expected throughput knee-point and saturation behavior that occurs once the DRAM bandwidth becomes the limiting factor. In addition to matching their observations, our profiling made it more apparent that the SPU compute units remained largely underutilized even as the batch size increased, which confirmed that the performance stalls are driving my memory contention rather than arithmetic workload. The behavior was visible across all the LLM models, which reinforces the idea that the bottleneck is coming from the frequent KV-cache reads. 
-
-The BCA we developed used these observations to select batch sizes that maximize throughput while staying out of the plateau region. Our results showed that high throughput can be maintained while using only a small fraction of the memory that is consumed at the maximum batch size. This makes it clear that the default approach to serving, where the system allocates the largest batch that fits in memory, leads to unnecessary memory usage and minimal improvement in performance. By identifying the smallest batch size that still reaches near-peak throughput, the BCA highlights how much GPU memory is typically left sitting unused in standard configurations. This extra memory capacity has practical value. It can be repurposed to run additional model replicas on the same GPU, support more users at the same time, or handle larger prompts without hurting performance. This shows that batching choices guided by real profiling data, rather than fixed limits or estimates, which can noticeably improve the performance of LLM inference pipelines. 
-
-In the end, our implementation confirms the results and conclusion the original work and demonstrates that both GPU profiling and batch optimization can be reproduced in a practical setting. By validating the memory-bound nature of LLM inference and showing that optimized batching strategies lead to an improvement in memory performance along with throughput, this project establishes a practical workflow that helps evaluate and enhance how LLMs are served on modern GPU hardware. The combined profiling results and BCA implementation give a clear roadmap for future enhancements, including integrating deeper kernel-level analysis and expanding the system to support multi-replica configurations. Overall, this work shows that careful measurement and informed batching choices have a direct impact on throughput, latency, and resource efficiency in modern LLMs. 
-
 % OPT-1.3B
 \begin{table}[htbp]
 \centering
-\caption{Throughput vs Peak Memory Allocation Trade-off (OPT-1.3B) with $B_{\mathrm{opt}}=64$}
-\begin{tabularx}{\linewidth}{r Y Y Y Y}
+\caption{Throughput vs Peak Memory Allocation Trade-off for OPT-1.3B with $B_{\mathrm{opt}}=64$}
+\begin{tabular}{rrrrr}
 \toprule
-\textbf{Batch} & \textbf{Throughput (tokens/s)} & \textbf{\% of Max Throughput} & \textbf{\% of GPU Mem} & \textbf{Peak Mem Alloc (GB)} \\
+\textbf{\shortstack{Batch\\Size}} & \textbf{\shortstack{Throughput\\(tokens/s)}} & \textbf{\shortstack{\% of Max\\Throughput}} & \textbf{\shortstack{\% of GPU\\Memory}} & \textbf{\shortstack{Peak Memory\\Allocation (GB)}} \\
 \midrule
 1   & 146.774  & 1.65\%  & 3.49\%  & 2.60  \\
 2   & 285.705  & 3.21\%  & 3.62\%  & 2.70  \\
@@ -156,18 +181,18 @@ In the end, our implementation confirms the results and conclusion the original 
 128 & 8298.988 & 93.26\% & 21.84\% & 16.27 \\
 256 & 8898.890 & 100.00\% & 40.34\% & 30.05 \\
 \bottomrule
-\end{tabularx}
+\end{tabular}
 \end{table}
 
 
 % OPT-2.7B
 \begin{table}[htbp]
 \centering
-\caption{Throughput vs Peak-Alloc Trade-off (OPT-2.7B). Reported $B_{\mathrm{opt}}=64$ achieves 82.10\% of max throughput while using 21.33\% of GPU memory (peak\_alloc).}
+\caption{Throughput vs Peak Memory Allocation Trade-off for OPT-2.7B with $B_{\mathrm{opt}}=64$}
 \label{tab:tradeoff-opt-2.7b}
 \begin{tabular}{rrrrr}
 \toprule
-\textbf{Batch} & \textbf{Throughput (tk/s)} & \textbf{\% of Max Throughput} & \textbf{\% of GPU Mem} & \textbf{Peak Mem Alloc (GB)} \\
+\textbf{\shortstack{Batch\\Size}} & \textbf{\shortstack{Throughput\\(tokens/s)}} & \textbf{\shortstack{\% of Max\\Throughput}} & \textbf{\shortstack{\% of GPU\\Memory}} & \textbf{\shortstack{Peak Memory\\Allocation (GB)}} \\
 \midrule
 1   & 118.167  & 2.12\%  & 6.90\%  & 5.14  \\
 2   & 233.970  & 4.20\%  & 7.15\%  & 5.33  \\
@@ -189,7 +214,7 @@ In the end, our implementation confirms the results and conclusion the original 
 \label{tab:tradeoff-llama2-13b}
 \begin{tabular}{rrrrr}
 \toprule
-\textbf{Batch} & \textbf{Throughput (tk/s)} & \textbf{\% of Max Throughput} & \textbf{\% of GPU Mem} & \textbf{Peak Mem Alloc (GB)} \\
+\textbf{\shortstack{Batch\\Size}} & \textbf{\shortstack{Throughput\\(tokens/s)}} & \textbf{\shortstack{\% of Max\\Throughput}} & \textbf{\shortstack{\% of GPU\\Memory}} & \textbf{\shortstack{Peak Memory\\Allocation (GB)}} \\
 \midrule
 1  & 56.744   & 3.51\%  & 33.14\% & 24.69 \\
 2  & 92.787   & 5.74\%  & 33.68\% & 25.10 \\
@@ -209,7 +234,7 @@ In the end, our implementation confirms the results and conclusion the original 
 \label{tab:tradeoff-llama2-7b}
 \begin{tabular}{rrrrr}
 \toprule
-\textbf{Batch} & \textbf{Throughput (tk/s)} & \textbf{\% of Max Throughput} & \textbf{\% of GPU Mem} & \textbf{Peak Mem Allocation (GB)} \\
+\textbf{\shortstack{Batch\\Size}} & \textbf{\shortstack{Throughput\\(tokens/s)}} & \textbf{\shortstack{\% of Max\\Throughput}} & \textbf{\shortstack{\% of GPU\\Memory}} & \textbf{\shortstack{Peak Memory\\Allocation (GB)}} \\
 \midrule
 1   & 70.558   & 2.29\%  & 17.25\% & 12.85 \\
 2   & 141.461  & 4.58\%  & 17.59\% & 13.11 \\
@@ -222,6 +247,21 @@ In the end, our implementation confirms the results and conclusion the original 
 \bottomrule
 \end{tabular}
 \end{table}
+
+
+\section{Conclusion}
+
+Our project has successfully reproduced the findings from the authors and created a practical version of the BCA. Using the UCF ARCC Newton cluster on four different LLMS, we have verified that the decode phase dominated inference time and becomes memory-bounded at larger batch sizes, which was consistent with the results that the original authors produced. The GPU profiling clearly showed the expected throughput knee-point and saturation behavior that occurs once the DRAM bandwidth becomes the limiting factor. In addition to matching their observations, our profiling made it more apparent that the SPU compute units remained largely underutilized even as the batch size increased, which confirmed that the performance stalls are driving my memory contention rather than arithmetic workload. The behavior was visible across all the LLM models, which reinforces the idea that the bottleneck is coming from the frequent KV-cache reads. 
+
+The BCA we developed used these observations to select batch sizes that maximize throughput while staying out of the plateau region. Our results showed that high throughput can be maintained while using only a small fraction of the memory that is consumed at the maximum batch size. This makes it clear that the default approach to serving, where the system allocates the largest batch that fits in memory, leads to unnecessary memory usage and minimal improvement in performance. By identifying the smallest batch size that still reaches near-peak throughput, the BCA highlights how much GPU memory is typically left sitting unused in standard configurations. This extra memory capacity has practical value. It can be repurposed to run additional model replicas on the same GPU, support more users at the same time, or handle larger prompts without hurting performance. This shows that batching choices guided by real profiling data, rather than fixed limits or estimates, which can noticeably improve the performance of LLM inference pipelines. 
+
+In the end, our implementation confirms the results and conclusion the original work and demonstrates that both GPU profiling and batch optimization can be reproduced in a practical setting. By validating the memory-bound nature of LLM inference and showing that optimized batching strategies lead to an improvement in memory performance along with throughput, this project establishes a practical workflow that helps evaluate and enhance how LLMs are served on modern GPU hardware. The combined profiling results and BCA implementation give a clear roadmap for future enhancements, including integrating deeper kernel-level analysis and expanding the system to support multi-replica configurations. Overall, this work shows that careful measurement and informed batching choices have a direct impact on throughput, latency, and resource efficiency in modern LLMs. 
+
+\section*{References}
+
+\begin{thebibliography}{00}
+\bibitem{tutr} L. Shi, L. Wang, S. Zhou and G. Hua, "Trajectory Unified Transformer for Pedestrian Trajectory Prediction," 2023 IEEE/CVF International Conference on Computer Vision (ICCV), Paris, France, 2023, pp. 9641-9650, doi: 10.1109/ICCV51070.2023.00887.
+\end{thebibliography}
 
 
 \end{document}

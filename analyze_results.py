@@ -50,7 +50,6 @@ def plot_batchsize_vs_time(model, dtype, output_tokens, input_tokens, parquet_fi
 
 
 def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_filename, save_dir):
-
     df = pd.read_parquet(parquet_filename)
 
     # Filter on dtype, output_tokens, input_tokens
@@ -61,6 +60,9 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
 
     models = sub_all.index.get_level_values("model").unique()
 
+    # ----------------------------------------------------------------------
+    # Throughput vs Batch Size
+    # ----------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(4.5, 3.5))
 
     for m in models:
@@ -75,9 +77,8 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
     ax.set_ylabel("Throughput (tokens/sec)")
     ax.set_title("Throughput vs Batch Size")
     ax.set_xlim(0, 600)
-    ax.set_xticks(np.arange(0, 501, 100))
+    ax.set_xticks(np.arange(0, 601, 100))
     ax.grid(True)
-
     ax.legend()
     plt.tight_layout()
 
@@ -85,6 +86,30 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
     plt.savefig(f"{save_dir}/throughput_vs_batchsize.png", dpi=300)
     plt.close(fig)
 
+    # ----------------------------------------------------------------------
+    # Latency vs Batch Size (inter-token latency in ms)
+    # ----------------------------------------------------------------------
+    fig_lat, ax_lat = plt.subplots(figsize=(4.5, 3.5))
+
+    for m in models:
+        sub_m = sub_all.xs(m, level="model").sort_index(level="batch")
+        batch_sizes = sub_m.index.get_level_values("batch")
+        latencies = sub_m["inter_token_latency_ms"]  # from profiler parquet
+
+        label = m.split("/")[-1]
+        ax_lat.plot(batch_sizes, latencies, marker="o", label=label)
+
+    ax_lat.set_xlabel("Batch Size")
+    ax_lat.set_ylabel("Latency (ms)")
+    ax_lat.set_title("Latency vs Batch Size")
+    ax_lat.set_xlim(0, 600)
+    ax_lat.set_xticks(np.arange(0, 601, 100))
+    ax_lat.grid(True)
+    ax_lat.legend()
+    plt.tight_layout()
+
+    plt.savefig(f"{save_dir}/latency_vs_batchsize.png", dpi=300)
+    plt.close(fig_lat)
 
 def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parquet_filename, save_dir):
 
@@ -144,9 +169,52 @@ def plot_throughput_vs_latency(model, dtype, output_tokens, input_tokens, parque
     plt.savefig(f"{save_dir}/{model_name}_throughput_vs_latency.png", dpi=300)
     plt.close(fig)
 
+def plot_throughput_vs_gpu_usage(dtype, output_tokens, input_tokens,
+                                 parquet_filename, gpu_mem_bytes,
+                                 save_path=None):
+
+    df = pd.read_parquet(parquet_filename)
+    idx = pd.IndexSlice
+
+    # Slice all models for given dtype / out / in
+    sub_all = df.loc[idx[:, dtype, :, output_tokens, input_tokens], :].reset_index()
+    sub_all = sub_all.sort_values(["model", "batch"])
+
+    # Compute % of GPU memory used by peak_alloc
+    sub_all["peak_alloc_pct_of_gpu"] = (
+        100.0 * sub_all["peak_alloc_bytes"] / gpu_mem_bytes
+    )
+
+    models = sub_all["model"].unique()
+
+    fig, ax = plt.subplots(figsize=(6.5, 3.5))
+
+    for m in models:
+        sub_m = sub_all[sub_all["model"] == m]
+        x = sub_m["peak_alloc_pct_of_gpu"]
+        y = sub_m["tokens_sec"]
+        label = m.split("/")[-1]
+        ax.plot(x, y, marker="o", label=label)
+
+    ax.set_xlabel("Maximuim GPU Memory Usage (%)")
+    ax.set_ylabel("Throughput (tokens/sec)")
+    #ax.set_title(f"Throughput vs GPU Usage (dtype={dtype}, out={output_tokens}, in={input_tokens})")
+    ax.grid(True)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(
+        handles, labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.15),  # x=center, y=just above the axes
+        ncol=len(labels),            # spread models in a row
+        frameon=False                # no box around legend (optional)
+    )
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=300)
+
 
 def print_tradeoff_table(model, dtype, output_tokens, input_tokens,
-                         parquet_filename, gpu_mem_bytes=None,
+                         parquet_filename, gpu_mem_bytes=None, save_dir="images",
                          slo_multiplier=2.0, eps=0.1):
     """
     Prints & returns a DataFrame comparing percent of max throughput vs
@@ -225,6 +293,15 @@ def print_tradeoff_table(model, dtype, output_tokens, input_tokens,
           f"[peak_alloc={row_opt['peak_alloc_gb']:.2f} GB, "
           f"GPU total={(f'{gpu_total_gb:.2f} GB' if np.isfinite(gpu_total_gb) else 'NaN')}]")
 
+    plot_throughput_vs_gpu_usage(
+        dtype=dtype,
+        output_tokens=output_tokens,
+        input_tokens=input_tokens,
+        parquet_filename=parquet_filename,
+        gpu_mem_bytes=gpu_mem_bytes,
+        save_path=f"{save_dir}/throughput_vs_gpu_usage.png"
+    )
+
     return table
 
 
@@ -262,6 +339,5 @@ create_plots(
     input_tokens=128,
     output_tokens=256,
     parquet_filename="results/final_results.parquet",
-    #parquet_filename="batchsize_1-256_128_256_newton.parquet",
     save_dir="images",
 )
