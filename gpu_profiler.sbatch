@@ -4,6 +4,6 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=16G
 #SBATCH --time=00:30:00
-#SBATCH -o batchsize_%j.out
+#SBATCH -o gpu_profiler_%j.out
 
-time python profiler.py --all
+time python gpu_profiler.py --all

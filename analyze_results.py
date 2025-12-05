@@ -94,7 +94,7 @@ def plot_throughput_vs_batchsize(dtype, output_tokens, input_tokens, parquet_fil
     for m in models:
         sub_m = sub_all.xs(m, level="model").sort_index(level="batch")
         batch_sizes = sub_m.index.get_level_values("batch")
-        latencies = sub_m["inter_token_latency_ms"]  # from profiler parquet
+        latencies = sub_m["inter_token_latency_ms"]
 
         label = m.split("/")[-1]
         ax_lat.plot(batch_sizes, latencies, marker="o", label=label)
