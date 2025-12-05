@@ -27,3 +27,12 @@ To run the BCA, ensure GPU profiling results exist and are stored in a `.parquet
 ```
 python bca.py
 ```
+
+## Analyze Results
+
+The `analyze_results.py` script can be run in order to generate the various plots
+and graphs used in the final report.
+
+```
+python analyze_results.py
+```
